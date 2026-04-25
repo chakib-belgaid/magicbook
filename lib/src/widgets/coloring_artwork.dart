@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 
+import '../models/coloring_region.dart';
 import '../models/coloring_result.dart';
+import '../models/drawing_mode.dart';
+import '../models/drawing_stroke.dart';
 import '../models/palette_color.dart';
 import '../theme/magic_book_theme.dart';
 
@@ -11,14 +14,24 @@ class ColoringArtwork extends StatelessWidget {
     required this.result,
     required this.mode,
     this.selectedPaletteNumber,
+    this.strokes = const <DrawingStroke>[],
+    this.selectedRegionId,
     this.onRegionTap,
+    this.onDrawingStart,
+    this.onDrawingUpdate,
+    this.onDrawingEnd,
     super.key,
   });
 
   final ColoringResult result;
   final ArtworkMode mode;
   final int? selectedPaletteNumber;
+  final List<DrawingStroke> strokes;
+  final int? selectedRegionId;
   final ValueChanged<int>? onRegionTap;
+  final ValueChanged<Offset>? onDrawingStart;
+  final ValueChanged<Offset>? onDrawingUpdate;
+  final VoidCallback? onDrawingEnd;
 
   @override
   Widget build(BuildContext context) {
@@ -27,7 +40,7 @@ class ColoringArtwork extends StatelessWidget {
       child: LayoutBuilder(
         builder: (context, constraints) {
           return GestureDetector(
-            onTapUp: onRegionTap == null
+            onTapUp: onRegionTap == null && onDrawingStart == null
                 ? null
                 : (details) {
                     final local = details.localPosition;
@@ -35,11 +48,36 @@ class ColoringArtwork extends StatelessWidget {
                       constraints.maxWidth,
                       constraints.maxHeight,
                     );
+                    if (onDrawingStart != null) {
+                      onDrawingStart!(_normalize(local, size));
+                      onDrawingEnd?.call();
+                      return;
+                    }
                     final tapped = _regionAt(local, size);
-                    if (tapped != null) {
+                    if (tapped != null && onRegionTap != null) {
                       onRegionTap!(tapped);
                     }
                   },
+            onPanStart: onDrawingStart == null
+                ? null
+                : (details) {
+                    final size = Size(
+                      constraints.maxWidth,
+                      constraints.maxHeight,
+                    );
+                    onDrawingStart!(_normalize(details.localPosition, size));
+                  },
+            onPanUpdate: onDrawingUpdate == null
+                ? null
+                : (details) {
+                    final size = Size(
+                      constraints.maxWidth,
+                      constraints.maxHeight,
+                    );
+                    onDrawingUpdate!(_normalize(details.localPosition, size));
+                  },
+            onPanEnd: onDrawingEnd == null ? null : (_) => onDrawingEnd!(),
+            onPanCancel: onDrawingEnd,
             child: DecoratedBox(
               decoration: BoxDecoration(
                 color: Colors.white,
@@ -62,7 +100,14 @@ class ColoringArtwork extends StatelessWidget {
                         result: result,
                         mode: mode,
                         selectedPaletteNumber: selectedPaletteNumber,
+                        selectedRegionId: selectedRegionId,
                         drawNumbers: false,
+                      ),
+                    ),
+                    CustomPaint(
+                      painter: _DrawingStrokePainter(
+                        result: result,
+                        strokes: strokes,
                       ),
                     ),
                     if (result.outlinePngBytes != null)
@@ -77,6 +122,7 @@ class ColoringArtwork extends StatelessWidget {
                         result: result,
                         mode: mode,
                         selectedPaletteNumber: selectedPaletteNumber,
+                        selectedRegionId: selectedRegionId,
                         drawRegions: false,
                       ),
                     ),
@@ -99,6 +145,10 @@ class ColoringArtwork extends StatelessWidget {
     }
     return null;
   }
+
+  Offset _normalize(Offset position, Size size) {
+    return Offset(position.dx / size.width, position.dy / size.height);
+  }
 }
 
 class _ColoringArtworkPainter extends CustomPainter {
@@ -106,6 +156,7 @@ class _ColoringArtworkPainter extends CustomPainter {
     required this.result,
     required this.mode,
     required this.selectedPaletteNumber,
+    required this.selectedRegionId,
     this.drawRegions = true,
     this.drawNumbers = true,
   });
@@ -113,6 +164,7 @@ class _ColoringArtworkPainter extends CustomPainter {
   final ColoringResult result;
   final ArtworkMode mode;
   final int? selectedPaletteNumber;
+  final int? selectedRegionId;
   final bool drawRegions;
   final bool drawNumbers;
 
@@ -139,6 +191,15 @@ class _ColoringArtworkPainter extends CustomPainter {
           ..style = PaintingStyle.fill
           ..color = shouldFill ? paletteColor.color : Colors.white;
         canvas.drawPath(path, fill);
+
+        if (region.id == selectedRegionId) {
+          canvas.drawPath(
+            path,
+            Paint()
+              ..style = PaintingStyle.fill
+              ..color = MagicBookColors.yellow.withValues(alpha: .16),
+          );
+        }
 
         if (result.outlinePngBytes == null) {
           final stroke = Paint()
@@ -254,8 +315,98 @@ class _ColoringArtworkPainter extends CustomPainter {
     return oldDelegate.result != result ||
         oldDelegate.mode != mode ||
         oldDelegate.selectedPaletteNumber != selectedPaletteNumber ||
+        oldDelegate.selectedRegionId != selectedRegionId ||
         oldDelegate.drawRegions != drawRegions ||
         oldDelegate.drawNumbers != drawNumbers;
+  }
+}
+
+class _DrawingStrokePainter extends CustomPainter {
+  const _DrawingStrokePainter({required this.result, required this.strokes});
+
+  final ColoringResult result;
+  final List<DrawingStroke> strokes;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    for (final stroke in strokes) {
+      if (stroke.points.isEmpty) {
+        continue;
+      }
+
+      final clipPath = _clipPathFor(stroke, size);
+      if (clipPath == null && stroke.mode != DrawingMode.freeDraw) {
+        continue;
+      }
+
+      final paint = Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = stroke.brushSize
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round
+        ..color = stroke.color.withValues(alpha: .78);
+
+      final dotPaint = Paint()
+        ..style = PaintingStyle.fill
+        ..color = stroke.color.withValues(alpha: .78);
+
+      canvas.save();
+      if (clipPath != null) {
+        canvas.clipPath(clipPath, doAntiAlias: true);
+      }
+
+      Offset? previous;
+      final maxGap = (stroke.brushSize / size.shortestSide * 3).clamp(
+        .025,
+        .08,
+      );
+      for (final point in stroke.points) {
+        final scaled = Offset(point.dx * size.width, point.dy * size.height);
+        canvas.drawCircle(scaled, stroke.brushSize / 2, dotPaint);
+        if (previous != null && (point - previous).distance <= maxGap) {
+          final start = Offset(
+            previous.dx * size.width,
+            previous.dy * size.height,
+          );
+          canvas.drawLine(start, scaled, paint);
+        }
+        previous = point;
+      }
+      canvas.restore();
+    }
+  }
+
+  Path? _clipPathFor(DrawingStroke stroke, Size size) {
+    final path = Path();
+    var hasPath = false;
+
+    for (final region in result.regions) {
+      final include = switch (stroke.mode) {
+        DrawingMode.rightColor => _regionMatchesColor(region, stroke.color),
+        DrawingMode.zoneColor => region.id == stroke.selectedRegionId,
+        DrawingMode.freeDraw => false,
+      };
+      if (include) {
+        path.addPath(_pathFor(region.contour, size), Offset.zero);
+        hasPath = true;
+      }
+    }
+
+    return hasPath ? path : null;
+  }
+
+  bool _regionMatchesColor(ColoringRegion region, Color color) {
+    for (final entry in result.palette) {
+      if (entry.number == region.paletteNumber) {
+        return entry.color.toARGB32() == color.toARGB32();
+      }
+    }
+    return false;
+  }
+
+  @override
+  bool shouldRepaint(covariant _DrawingStrokePainter oldDelegate) {
+    return oldDelegate.result != result || oldDelegate.strokes != strokes;
   }
 }
 

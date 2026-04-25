@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as img;
 import 'package:magicbook/src/models/coloring_result.dart';
+import 'package:magicbook/src/models/drawing_mode.dart';
 import 'package:magicbook/src/models/picked_image.dart';
 import 'package:magicbook/src/screens/home_shell.dart';
 import 'package:magicbook/src/services/export_service.dart';
@@ -21,6 +22,7 @@ void main() {
     expect(find.text('Create'), findsWidgets);
     expect(find.text('1. Upload a picture'), findsOneWidget);
     expect(find.text('2. Choose complexity'), findsOneWidget);
+    expect(find.byTooltip('Premium'), findsNothing);
   });
 
   testWidgets('complexity picker changes selected preset', (tester) async {
@@ -81,7 +83,9 @@ void main() {
   testWidgets('starting generation navigates through Processing to Ready', (
     tester,
   ) async {
-    final controller = _controller();
+    final controller = _controller(
+      stageDelay: const Duration(milliseconds: 100),
+    );
     await _pumpTestApp(tester, controller: controller);
 
     await tester.ensureVisible(
@@ -94,14 +98,18 @@ void main() {
       find.byKey(const ValueKey('createColoringButton')),
     );
     await tester.tap(find.byKey(const ValueKey('createColoringButton')));
-    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 50));
 
     expect(find.text('Creating...', skipOffstage: false), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('loadingMascotAsset'), skipOffstage: false),
+      findsWidgets,
+    );
 
     await tester.pumpAndSettle();
 
     expect(find.text('Your Coloring is Ready!'), findsOneWidget);
-    expect(find.text('Color by Numbers'), findsOneWidget);
+    expect(find.text('Draw Now'), findsOneWidget);
   });
 
   testWidgets('palette legend renders expected numbered colors', (
@@ -125,6 +133,73 @@ void main() {
     expect(find.text('Cream'), findsOneWidget);
     expect(find.text('Honey'), findsOneWidget);
   });
+
+  testWidgets('drawing screen shows modes, score, swatches, and tools', (
+    tester,
+  ) async {
+    await _pumpReadyApp(tester);
+
+    await tester.tap(find.text('Draw Now'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Draw'), findsOneWidget);
+    expect(find.byKey(const ValueKey('drawingModeSelector')), findsOneWidget);
+    expect(find.byKey(const ValueKey('drawingScoreChip')), findsOneWidget);
+    expect(find.byKey(const ValueKey('drawingSwatchTray')), findsOneWidget);
+    expect(find.text('Right color'), findsOneWidget);
+    expect(find.text('Zone color'), findsOneWidget);
+    expect(find.text('Free draw'), findsOneWidget);
+    expect(find.text('Undo'), findsOneWidget);
+    expect(find.text('Hint'), findsOneWidget);
+    expect(find.text('Reset'), findsOneWidget);
+  });
+
+  test(
+    'drawing accuracy follows right-color, zone, and free-draw rules',
+    () async {
+      final controller = _controller(stageDelay: Duration.zero);
+      controller.useDemoPhoto();
+      await controller.createColoring();
+
+      controller.beginDrawing(const Offset(.52, .50));
+      controller.updateDrawing(const Offset(.22, .68));
+      controller.endDrawing();
+
+      expect(controller.drawingMode, DrawingMode.rightColor);
+      expect(controller.drawingCorrectSamples, 1);
+      expect(controller.drawingTotalSamples, 2);
+      expect(controller.drawingScorePercent, 50);
+      expect(controller.drawingStrokes.single.points.length, 1);
+
+      controller.undoDrawingStroke();
+      expect(controller.drawingTotalSamples, 0);
+
+      controller.setDrawingMode(DrawingMode.zoneColor);
+      controller.beginDrawing(const Offset(.22, .68));
+      controller.updateDrawing(const Offset(.79, .67));
+      controller.endDrawing();
+
+      expect(controller.selectedDrawingRegionId, 2);
+      expect(controller.drawingCorrectSamples, 1);
+      expect(controller.drawingTotalSamples, 2);
+      expect(controller.drawingScorePercent, 50);
+
+      controller.resetDrawing();
+      controller.setDrawingMode(DrawingMode.freeDraw);
+      controller.selectPaletteNumber(5);
+      controller.beginDrawing(const Offset(.22, .68));
+      controller.updateDrawing(const Offset(.52, .50));
+      controller.endDrawing();
+
+      expect(controller.drawingCorrectSamples, 1);
+      expect(controller.drawingTotalSamples, 2);
+      expect(controller.drawingScorePercent, 50);
+
+      controller.resetDrawing();
+      expect(controller.drawingScorePercent, 100);
+      expect(controller.drawingStrokes, isEmpty);
+    },
+  );
 
   testWidgets(
     'bottom navigation switches between Create, Gallery, and My Works',
@@ -153,6 +228,19 @@ Future<void> _pumpTestApp(
   await tester.binding.setSurfaceSize(const Size(430, 980));
   addTearDown(() => tester.binding.setSurfaceSize(null));
   await tester.pumpWidget(_testApp(controller: controller));
+}
+
+Future<void> _pumpReadyApp(WidgetTester tester) async {
+  final controller = _controller(stageDelay: Duration.zero);
+  await _pumpTestApp(tester, controller: controller);
+  await tester.ensureVisible(find.byKey(const ValueKey('useDemoPhotoButton')));
+  await tester.tap(find.byKey(const ValueKey('useDemoPhotoButton')));
+  await tester.pump();
+  await tester.ensureVisible(
+    find.byKey(const ValueKey('createColoringButton')),
+  );
+  await tester.tap(find.byKey(const ValueKey('createColoringButton')));
+  await tester.pumpAndSettle();
 }
 
 Widget _testApp({MagicBookController? controller}) {

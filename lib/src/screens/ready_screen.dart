@@ -45,7 +45,7 @@ class ReadyScreen extends StatelessWidget {
             PaletteLegend(palette: result.palette),
             const SizedBox(height: 20),
             PrimaryButton(
-              label: 'Color by Numbers',
+              label: 'Draw Now',
               icon: Icons.palette_rounded,
               onPressed: () {
                 Navigator.of(context).push(

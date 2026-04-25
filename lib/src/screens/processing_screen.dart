@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../models/coloring_job.dart';
@@ -12,8 +14,25 @@ class ProcessingScreen extends StatefulWidget {
   State<ProcessingScreen> createState() => _ProcessingScreenState();
 }
 
-class _ProcessingScreenState extends State<ProcessingScreen> {
+class _ProcessingScreenState extends State<ProcessingScreen>
+    with SingleTickerProviderStateMixin {
   bool _navigated = false;
+  late final AnimationController _animationController;
+
+  @override
+  void initState() {
+    super.initState();
+    _animationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1800),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _animationController.dispose();
+    super.dispose();
+  }
 
   @override
   void didChangeDependencies() {
@@ -66,7 +85,7 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
                 ),
               ),
               const Spacer(),
-              const _CrayonMascot(),
+              _PlayfulLoadingMascot(animation: _animationController),
               const SizedBox(height: 34),
               Text(
                 'Creating...',
@@ -91,7 +110,7 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
               ),
               const SizedBox(height: 8),
               const Text(
-                'This may take a few seconds.',
+                'Your picture is becoming a coloring adventure.',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   color: Colors.black54,
@@ -107,75 +126,109 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
   }
 }
 
-class _CrayonMascot extends StatelessWidget {
-  const _CrayonMascot();
+class _PlayfulLoadingMascot extends StatelessWidget {
+  const _PlayfulLoadingMascot({required this.animation});
+
+  final Animation<double> animation;
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      height: 180,
-      child: CustomPaint(
-        painter: _CrayonMascotPainter(),
-        child: const SizedBox.expand(),
-      ),
+    return AnimatedBuilder(
+      animation: animation,
+      builder: (context, child) {
+        final bounce = (animation.value - .5).abs();
+        return SizedBox(
+          height: 230,
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              CustomPaint(
+                painter: _SparklePainter(animation.value),
+                child: const SizedBox.expand(),
+              ),
+              Transform.translate(
+                offset: Offset(0, -10 + bounce * 18),
+                child: Transform.rotate(
+                  angle: (animation.value - .5) * .08,
+                  child: Image.asset(
+                    'assets/images/loading_mascot.png',
+                    key: const ValueKey('loadingMascotAsset'),
+                    height: 214,
+                    fit: BoxFit.contain,
+                    filterQuality: FilterQuality.high,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }
 
-class _CrayonMascotPainter extends CustomPainter {
+class _SparklePainter extends CustomPainter {
+  const _SparklePainter(this.progress);
+
+  final double progress;
+
   @override
   void paint(Canvas canvas, Size size) {
-    final center = Offset(size.width / 2, size.height / 2);
-    final shadow = Paint()..color = const Color(0x227654F5);
+    final shadow = Paint()..color = const Color(0x1F7654F5);
     canvas.drawOval(
       Rect.fromCenter(
-        center: center + const Offset(0, 58),
-        width: 120,
-        height: 26,
+        center: Offset(size.width / 2, size.height * .88),
+        width: 150,
+        height: 24,
       ),
       shadow,
     );
-    final body = RRect.fromRectAndRadius(
-      Rect.fromCenter(center: center, width: 62, height: 138),
-      const Radius.circular(20),
+
+    final dots = <(Offset, Color, double)>[
+      (Offset(size.width * .16, size.height * .22), MagicBookColors.pink, 9),
+      (Offset(size.width * .82, size.height * .24), MagicBookColors.yellow, 8),
+      (Offset(size.width * .25, size.height * .72), MagicBookColors.mint, 7),
+      (Offset(size.width * .76, size.height * .68), MagicBookColors.sky, 10),
+      (Offset(size.width * .50, size.height * .08), MagicBookColors.purple, 6),
+    ];
+    for (var i = 0; i < dots.length; i += 1) {
+      final dot = dots[i];
+      final phase = (progress + i * .19) % 1;
+      final rise = (phase - .5).abs() * 24;
+      final paint = Paint()..color = dot.$2.withValues(alpha: .3 + phase * .6);
+      canvas.drawCircle(dot.$1.translate(0, -rise), dot.$3, paint);
+      _drawStar(
+        canvas,
+        dot.$1.translate(dot.$3 * 1.8, -rise - 8),
+        dot.$2,
+        dot.$3,
+      );
+    }
+  }
+
+  void _drawStar(Canvas canvas, Offset center, Color color, double radius) {
+    final path = Path();
+    for (var i = 0; i < 10; i += 1) {
+      final angle = -1.57 + i * .628;
+      final length = i.isEven ? radius : radius * .45;
+      final point = Offset(
+        center.dx + length * math.cos(angle),
+        center.dy + length * math.sin(angle),
+      );
+      if (i == 0) {
+        path.moveTo(point.dx, point.dy);
+      } else {
+        path.lineTo(point.dx, point.dy);
+      }
+    }
+    canvas.drawPath(
+      path..close(),
+      Paint()..color = color.withValues(alpha: .72),
     );
-    canvas.save();
-    canvas.translate(center.dx, center.dy);
-    canvas.rotate(.18);
-    canvas.translate(-center.dx, -center.dy);
-    canvas.drawRRect(body, Paint()..color = MagicBookColors.purple);
-    canvas.drawRRect(
-      body,
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 2
-        ..color = MagicBookColors.ink,
-    );
-    canvas.drawRect(
-      Rect.fromCenter(
-        center: center + const Offset(0, 44),
-        width: 62,
-        height: 14,
-      ),
-      Paint()..color = const Color(0xFF4D34BC),
-    );
-    final facePaint = Paint()..color = MagicBookColors.ink;
-    canvas.drawCircle(center + const Offset(-12, -8), 4, facePaint);
-    canvas.drawCircle(center + const Offset(12, -8), 4, facePaint);
-    canvas.drawArc(
-      Rect.fromCenter(
-        center: center + const Offset(0, 2),
-        width: 24,
-        height: 18,
-      ),
-      0,
-      3.14,
-      false,
-      facePaint..strokeWidth = 3,
-    );
-    canvas.restore();
   }
 
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+  bool shouldRepaint(covariant _SparklePainter oldDelegate) {
+    return oldDelegate.progress != progress;
+  }
 }

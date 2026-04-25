@@ -31,16 +31,6 @@ class CreateScreen extends StatelessWidget {
                 color: MagicBookColors.purple,
               ),
             ),
-            actions: [
-              IconButton(
-                tooltip: 'Premium',
-                onPressed: () {},
-                icon: const Icon(
-                  Icons.workspace_premium_rounded,
-                  color: MagicBookColors.yellow,
-                ),
-              ),
-            ],
           ),
           SliverPadding(
             padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
